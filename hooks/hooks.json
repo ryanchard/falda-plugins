@@ -27,6 +27,28 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/falda-hook.mjs\" capture-tool",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/falda-hook.mjs\" capture-tool",
+            "async": true
+          }
+        ]
+      }
+    ],
     "PostCompact": [
       {
         "hooks": [

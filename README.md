@@ -111,6 +111,8 @@ its variable to the exact string `"0"` — any other value (including `""` or
 | `FALDA_AUTO_RECALL` | on | the first-prompt-of-session recall injection |
 | `FALDA_DISTILL_ON_COMPACT` | on | the `PreCompact` distill trigger |
 | `FALDA_RECALL_ON_COMPACT` | on | the post-compaction recall injection |
+| `FALDA_CAPTURE_TOOLS` | **off** | capturing tool results to T0 (opt-in; requires `FALDA_CAPTURE`) |
+| `FALDA_CAPTURE_TOOL_MAX_CHARS` | 16384 | verbatim ceiling per tool result before head+tail truncation |
 
 `FALDA_RECALL_ON_COMPACT` is additionally **forced off whenever
 `FALDA_CAPTURE=0`**, regardless of its own value. Post-compaction recall
@@ -120,11 +122,17 @@ there. With capture off, there is nothing extra for it to find.
 
 ## What gets captured
 
-Only user prose and assistant prose — no tool calls, no tool results, no
-system messages. This matches the opencode plugin, which filters to text
-parts and drops everything else. Distillation runs an LLM over T0 to extract
-durable atoms; bash output and diffs are noise it would have to filter back
-out, while still costing embedding work per captured turn.
+User prose and assistant prose by default. Tool results are captured too when
+`FALDA_CAPTURE_TOOLS=1` — opt-in, because it multiplies row count and sends
+tool output to the distillation LLM.
+
+The original rationale for excluding them was that bash output and diffs are
+noise the distiller has to filter back out, at an embedding cost per row.
+That holds for the noise; it misses the facts. A value that enters a session
+only through a tool — a config value, a schema shape, a version, an error
+string — is never restated in prose, so it reaches neither T0 nor the
+compaction summary. See `docs/future/tool-output-capture.md` for the design
+and the measurement that settles which effect dominates.
 
 **Known fidelity limitation.** Assistant-side capture uses the `Stop` hook's
 `last_assistant_message` field, which is the turn's *final* response. In an

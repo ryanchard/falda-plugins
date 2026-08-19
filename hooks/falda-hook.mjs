@@ -9,6 +9,8 @@
  * Subcommands:
  *   capture-user        UserPromptSubmit (async) — user prose -> T0
  *   capture-assistant   Stop (async)             — assistant prose -> T0
+ *   capture-tool        PostToolUse / PostToolUseFailure (async)
+ *                                                  — tool results -> T0
  *   auto-recall         UserPromptSubmit (sync)  — recall + inject
  *   distill             PreCompact (async)       — enqueue distillation
  *   mark-compacted      PostCompact (async)      — arm post-compaction recall
@@ -21,6 +23,7 @@ import { resolveCreds, features } from "./lib/creds.mjs";
 import { callTool } from "./lib/mcp.mjs";
 import { readState, writeState } from "./lib/state.mjs";
 import { log } from "./lib/log.mjs";
+import { stringifyPayload, truncateMiddle, toolMaxChars, TOOL_INPUT_MAX_CHARS } from "./lib/payload.mjs";
 
 const TIMEOUT_MS = 5000;
 
@@ -88,6 +91,35 @@ async function main() {
     const text = String(input.last_assistant_message ?? "").trim();
     if (!text) return;
     await capture(creds, env, sessionId, "assistant", text, input.prompt_id ? `cc-${input.prompt_id}-assistant` : undefined);
+    return;
+  }
+
+  if (sub === "capture-tool") {
+    if (!f.captureTools) return;
+
+    const toolName = String(input.tool_name ?? "").trim();
+    if (!toolName) return;
+
+    // A user interrupt is not a fact about the world, just about timing.
+    if (input.is_interrupt) return;
+
+    // PostToolUse carries tool_response; PostToolUseFailure carries error
+    // instead. A single call cannot produce both, so they share one turn_id
+    // namespace without colliding.
+    const body = input.error !== undefined
+      ? `ERROR: ${stringifyPayload(input.error)}`
+      : stringifyPayload(input.tool_response);
+    if (!body.trim()) return;
+
+    // Echo the call before the output so extraction sees what produced the
+    // fact rather than a naked blob.
+    const args = truncateMiddle(stringifyPayload(input.tool_input), TOOL_INPUT_MAX_CHARS);
+    const content = `$ ${toolName} ${args}\n${truncateMiddle(body, toolMaxChars(env))}`;
+
+    // tool_use_id is always present and unique, so unlike the prose paths
+    // this turn_id has no missing-id fallback to worry about (see capture()).
+    const turnId = input.tool_use_id ? `cc-${input.tool_use_id}-tool` : undefined;
+    await capture(creds, env, sessionId, `tool:${toolName}`, content, turnId);
     return;
   }
 

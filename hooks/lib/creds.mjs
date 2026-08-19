@@ -16,7 +16,10 @@ export function resolveCreds(env = process.env) {
   return { mcpUrl, token, tenant };
 }
 
-/** Feature gating. Every feature is on unless its var is exactly "0". */
+/** Feature gating. Every feature is on unless its var is exactly "0" —
+ *  EXCEPT captureTools, which is opt-IN (must be exactly "1"). Tool capture
+ *  multiplies row count and ships tool output to the distillation LLM, so it
+ *  is not something a user should acquire by upgrading. */
 export function features(env = process.env) {
   const on = (v) => v !== "0";
   const capture = on(env.FALDA_CAPTURE);
@@ -27,5 +30,8 @@ export function features(env = process.env) {
     // Post-compaction recall re-surfaces detail the compaction summary
     // dropped, which only exists in T0 if capture is writing there.
     recallOnCompact: capture && on(env.FALDA_RECALL_ON_COMPACT),
+    // Same dependency, same reason: tool rows without prose rows is not a
+    // coherent state.
+    captureTools: capture && env.FALDA_CAPTURE_TOOLS === "1",
   };
 }
