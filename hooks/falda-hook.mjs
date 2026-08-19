@@ -100,13 +100,25 @@ async function main() {
     const toolName = String(input.tool_name ?? "").trim();
     if (!toolName) return;
 
+    // FALDA must never capture its OWN tool calls. A falda_recall response
+    // captured into T0 is re-distilled as if it were fresh evidence, so
+    // already-distilled atoms re-enter the stream and reinforce themselves:
+    // duplicate atoms accumulate every session, and any A/B measurement of
+    // capture value is contaminated by the capture mechanism's own output.
+    // falda_remember/falda_stream_add echo their input back, which would be
+    // stored twice for the same reason.
+    // Matched loosely on purpose: the MCP tool prefix depends on how the
+    // server is installed (`mcp__falda__falda_recall` when configured
+    // directly, `mcp__plugin_falda-memory_falda__falda_recall` via the
+    // plugin), so a prefix-exact check would silently stop matching.
+    if (/falda/i.test(toolName)) return;
+
     // A user interrupt is not a fact about the world, just about timing.
     if (input.is_interrupt) return;
 
-    // PostToolUse carries tool_response; PostToolUseFailure carries error
-    // instead. A single call cannot produce both, so they share one turn_id
-    // namespace without colliding.
-    const body = input.error !== undefined
+    // PostToolUse carries tool_response; PostToolUseFailure carries error.
+    const isFailure = input.error !== undefined;
+    const body = isFailure
       ? `ERROR: ${stringifyPayload(input.error)}`
       : stringifyPayload(input.tool_response);
     if (!body.trim()) return;
@@ -118,7 +130,19 @@ async function main() {
 
     // tool_use_id is always present and unique, so unlike the prose paths
     // this turn_id has no missing-id fallback to worry about (see capture()).
-    const turnId = input.tool_use_id ? `cc-${input.tool_use_id}-tool` : undefined;
+    //
+    // Success and failure get SEPARATE turn_id namespaces even though the
+    // current Claude Code binary emits exactly one of PostToolUse /
+    // PostToolUseFailure per tool call. That "exactly one" is a property of
+    // the harness, not a contract we control: if it ever emitted both (a
+    // retry, a partial result followed by an error), a shared namespace
+    // would make the second arrival a turn_id collision, and src/falda.ts's
+    // dedup discards a repeated turn_id WITHOUT comparing content — the
+    // error message, the higher-value half, would vanish silently. Splitting
+    // the namespaces costs nothing and makes that failure mode impossible.
+    const turnId = input.tool_use_id
+      ? `cc-${input.tool_use_id}-${isFailure ? "toolerr" : "tool"}`
+      : undefined;
     await capture(creds, env, sessionId, `tool:${toolName}`, content, turnId);
     return;
   }

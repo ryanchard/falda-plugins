@@ -24,7 +24,11 @@ export function stringifyPayload(value) {
   if (value === undefined || value === null) return "";
   if (typeof value === "string") return value;
   try {
-    return JSON.stringify(value);
+    // JSON.stringify returns undefined — not a string — for a function or a
+    // symbol. Nothing on the JSON-stdin path can produce one today, but the
+    // declared contract here is "always a string", and the caller does
+    // `body.trim()` on the result, which would throw on undefined.
+    return JSON.stringify(value) ?? String(value);
   } catch {
     // Circular or otherwise unserializable — never throw inside a hook.
     return String(value);

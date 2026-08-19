@@ -101,9 +101,11 @@ in practice.
 
 ## Feature flags
 
-All four features default on. Each is switched off independently by setting
-its variable to the exact string `"0"` — any other value (including `""` or
-`"false"`) leaves it on:
+The first four features — the ones in the table immediately below — default
+on. Each is switched off independently by setting its variable to the exact
+string `"0"` — any other value (including `""` or `"false"`) leaves it on.
+Tool capture, in its own subsection further down, is the exception: it
+defaults **off** and has the opposite polarity.
 
 | Env var | Default | `0` disables |
 |---|---|---|
@@ -132,6 +134,68 @@ should end up with by inaction.
 |---|---|---|
 | `FALDA_CAPTURE_TOOLS` | **off** | set to exactly `"1"` (and `FALDA_CAPTURE` on) to capture tool results to T0 |
 | `FALDA_CAPTURE_TOOL_MAX_CHARS` | 16384 | verbatim ceiling per tool result before head+tail truncation |
+
+FALDA's own MCP tools are never captured: the hook skips any tool whose name
+matches `/falda/i`. Capturing a `falda_recall` response would feed
+already-distilled memory back into T0 to be re-distilled as fresh evidence,
+so atoms would reinforce themselves session after session.
+
+#### No redaction
+
+**Tool output is stored verbatim — there is no redaction anywhere in FALDA
+today.** If a captured call prints a secret (`cat .env`, `env`,
+`gh auth token`, a connection string in a stack trace), that secret lands in
+SQLite, in the FTS index, and in every distillation prompt sent to your
+configured LLM. Turn this flag on only where that is acceptable — in
+practice, a local store distilled by a local model. See §8 of
+`docs/future/tool-output-capture.md`, which records this as a blocker for
+any default-on proposal.
+
+#### Distillation cannot keep up with a tool-capture session
+
+This is the real operational cost of the flag, and it is worth understanding
+before turning it on. The ceiling on distillation throughput is not the
+character budget — it is the extraction window against the sweep cadence:
+
+- L1 extraction reads at most `windowSize` turns per pass, default **20**
+  (`DEFAULT_WINDOW_SIZE`, `src/distill/core.ts`). There is no environment
+  variable for this one — it is a constant, so raising it is a code change.
+- The worker enqueues passive work once per `FALDA_SWEEP_INTERVAL_MS`,
+  default **300000** (5 minutes), and the enqueue coalesces — a store never
+  has more than one pending passive job — so a store gets **one pass per
+  sweep interval**. `FALDA_DRAIN_INTERVAL_MS` (default 60000) only sets how
+  soon after that enqueue the pass actually starts (`src/distill/worker.ts`).
+
+At the defaults that is roughly **4 turns per minute** in steady state. Once
+rows are large the window is trimmed by `FALDA_DISTILL_WINDOW_MAX_CHARS`
+(default 60000) before the prompt is built, so a pass covering 16 KB tool
+rows carries only three or four of them — **under 1 turn per minute**.
+
+A session with tool capture on writes turns an order of magnitude faster
+than that. Nothing is lost: the watermark simply falls behind and the
+backlog drains after the session ends. But "I'll recall that next session"
+can mean hours from now rather than minutes, and the gap grows with every
+additional capturing session. If that matters for how you work, lower
+`FALDA_SWEEP_INTERVAL_MS` (and `FALDA_DRAIN_INTERVAL_MS` with it, since the
+drain tick must be at least as frequent to be useful); raising
+`DEFAULT_WINDOW_SIZE` is the other lever, at the cost of a larger prompt per
+pass. The `PreCompact` distill hook and `/falda-memory:distill` both
+enqueue at explicit priority and wake the drain immediately, but each still
+runs a single window — they shorten the wait, they do not raise the ceiling.
+
+#### Backpressure onto auto-recall
+
+`PostToolUse` hooks are registered `async`, and one fires per tool call, so
+several `node` processes can be in flight against the FALDA server at the
+same time — each one an `addStream` that embeds its row inline
+(`src/falda.ts`). The plugin's one *synchronous* hook, `auto-recall`, shares
+that same server and has only a 5 s client budget (`TIMEOUT_MS` in
+`falda-hook.mjs`). Under a burst of tool calls, ingest can therefore starve
+recall: the recall request times out, the hook logs a warning to
+`hook.log`, exits 0, and the prompt proceeds with no memory injected. That
+failure is silent by design — a hook must never block or break a prompt —
+so if auto-recall seems to fire less often once tool capture is on, check
+`hook.log` before assuming recall is broken.
 
 ## What gets captured
 
