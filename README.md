@@ -111,14 +111,27 @@ its variable to the exact string `"0"` — any other value (including `""` or
 | `FALDA_AUTO_RECALL` | on | the first-prompt-of-session recall injection |
 | `FALDA_DISTILL_ON_COMPACT` | on | the `PreCompact` distill trigger |
 | `FALDA_RECALL_ON_COMPACT` | on | the post-compaction recall injection |
-| `FALDA_CAPTURE_TOOLS` | **off** | capturing tool results to T0 (opt-in; requires `FALDA_CAPTURE`) |
-| `FALDA_CAPTURE_TOOL_MAX_CHARS` | 16384 | verbatim ceiling per tool result before head+tail truncation |
 
 `FALDA_RECALL_ON_COMPACT` is additionally **forced off whenever
 `FALDA_CAPTURE=0`**, regardless of its own value. Post-compaction recall
 exists to re-surface detail the compaction summary dropped — but that detail
 only exists in T0 if auto-capture has been writing this session's turns
 there. With capture off, there is nothing extra for it to find.
+
+### Tool capture
+
+Unlike the four flags above, tool capture is **off by default** and must be
+turned on explicitly: it is off unless `FALDA_CAPTURE_TOOLS` is exactly the
+string `"1"`, and it additionally requires `FALDA_CAPTURE` to be on (a tool
+row with no prose rows around it is not a coherent state). This is the
+opposite polarity from the table above on purpose — tool output multiplies
+row count and is sent to the distillation LLM, so it's not something a user
+should end up with by inaction.
+
+| Env var | Default | Effect |
+|---|---|---|
+| `FALDA_CAPTURE_TOOLS` | **off** | set to exactly `"1"` (and `FALDA_CAPTURE` on) to capture tool results to T0 |
+| `FALDA_CAPTURE_TOOL_MAX_CHARS` | 16384 | verbatim ceiling per tool result before head+tail truncation |
 
 ## What gets captured
 
