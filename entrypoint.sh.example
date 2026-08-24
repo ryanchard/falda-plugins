@@ -6,7 +6,8 @@
 # memory for opencode at container start, then hands off to the container's
 # real command ("$@"):
 #
-#   1. Auto-capture plugin: copy the FALDA capture plugin from a mounted
+#   1. Auto-capture plugin: copy the FALDA capture plugin — falda-capture.ts
+#      and its required sibling module capture-flush.ts — from a mounted
 #      FALDA checkout into ~/.config/opencode/plugins/ so opencode picks it
 #      up at startup (https://opencode.ai/docs/plugins/ "local files").
 #      Copied fresh on every container start, so the plugin always tracks
