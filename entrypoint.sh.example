@@ -75,10 +75,20 @@ GLOBAL_CONFIG="${OC_CONFIG_DIR}/opencode.json"
 PLUGIN_SRC="${FALDA_PLUGIN_SRC:-/opt/falda/integrations/opencode/plugin/falda-capture.ts}"
 
 # ---- 1. capture plugin -----------------------------------------------------
+# falda-capture.ts imports its sibling module capture-flush.ts at runtime, so
+# both must be copied together. The sibling's path is derived from
+# PLUGIN_SRC's directory rather than a second env var, so there is one
+# source of truth for "which FALDA checkout" both files come from.
+FLUSH_SRC="$(dirname "${PLUGIN_SRC}")/capture-flush.ts"
 if [ "${FALDA_CAPTURE:-1}" != "0" ] && [ -f "${PLUGIN_SRC}" ]; then
   mkdir -p "${PLUGIN_DIR}"
   cp -f "${PLUGIN_SRC}" "${PLUGIN_DIR}/falda-capture.ts"
-  echo "falda-entrypoint: installed capture plugin from ${PLUGIN_SRC}"
+  if [ -f "${FLUSH_SRC}" ]; then
+    cp -f "${FLUSH_SRC}" "${PLUGIN_DIR}/capture-flush.ts"
+    echo "falda-entrypoint: installed capture plugin from ${PLUGIN_SRC} (+ ${FLUSH_SRC})"
+  else
+    echo "falda-entrypoint: capture-flush.ts not found at ${FLUSH_SRC} — falda-capture.ts will fail to load" >&2
+  fi
 elif [ "${FALDA_CAPTURE:-1}" != "0" ]; then
   echo "falda-entrypoint: capture plugin source not found at ${PLUGIN_SRC} — skipping" >&2
 fi

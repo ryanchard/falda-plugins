@@ -242,6 +242,7 @@ Copy the plugin and give it a `package.json` for its MCP client dependency:
 ```bash
 mkdir -p .opencode/plugins
 cp path/to/falda/integrations/opencode/plugin/falda-capture.ts .opencode/plugins/
+cp path/to/falda/integrations/opencode/plugin/capture-flush.ts .opencode/plugins/
 cp path/to/falda/integrations/opencode/package.json.example .opencode/package.json
 ```
 
@@ -315,7 +316,8 @@ at each start rather than copying the plugin manually per project.
 `integrations/opencode/entrypoint.sh.example` is a ready-to-adapt reference
 implementation. The pattern has two steps:
 
-1. **Copy the capture plugin** from a mounted FALDA checkout into
+1. **Copy the capture plugin** — both `falda-capture.ts` and its required
+   sibling module `capture-flush.ts` — from a mounted FALDA checkout into
    `~/.config/opencode/plugins/` on every container start (so the plugin
    always tracks whatever checkout is mounted — no image rebuild needed to
    pick up plugin changes).
@@ -351,7 +353,9 @@ CMD ["bash"]
 At runtime, bind-mount the FALDA checkout and set `FALDA_PLUGIN_SRC` to
 its `integrations/opencode/plugin/falda-capture.ts` path inside the
 container, or set `FALDA_PLUGIN_SRC` in the environment if your mount path
-differs from the default in `entrypoint.sh.example`.
+differs from the default in `entrypoint.sh.example`. The entrypoint copies
+`capture-flush.ts` (falda-capture.ts's required sibling module) from the
+same directory automatically — no separate variable needed.
 
 ### Per-project opencode.json must be the full mcp.falda block
 
