@@ -90,8 +90,9 @@ curl -s localhost:8079/healthz   # {"ok":true,"mcp":true}
 For the "one FALDA instance behind several containerized opencode agents"
 deployment this whole integration targets, run FALDA as another service on
 the same Compose network as the agents rather than by hand. This repo ships
-a `Dockerfile` (multi-stage: builds `better-sqlite3` + TypeScript, then a
-slim `node:24-trixie-slim` runtime) at the repo root, running `falda serve`
+a `Dockerfile` (multi-stage: builds TypeScript — no native addons, PGlite
+is WebAssembly and `pg` is pure JavaScript — then a slim
+`node:24-trixie-slim` runtime) at the repo root, running `falda serve`
 (`node dist/server.js`) by default — one process, both protocol surfaces,
 the distillation worker, and recall-trace pruning.
 
@@ -159,12 +160,16 @@ Notes:
   publishing `127.0.0.1:8077:8077` (and/or `:8079`) is only useful for
   host-side debugging (`curl`ing `/healthz`, `/recalls/metrics`, triggering
   an out-of-cycle `/distill`).
-- **Persistent store**: `falda-data` is a named volume for `FALDA_ROOT`, so
-  atoms/stream/scenes/core survive `docker compose down`/image rebuilds —
-  along with `distill_queue.db` and `recall_traces.db` (recall-trace
-  telemetry, pruned on its own retention schedule; see
-  `docs/RECALL_TRACES.md`). Use `docker compose down -v` only if you intend
-  to wipe memory (and telemetry) entirely.
+- **Persistent store**: with no `FALDA_DATABASE_URL` set (as in this
+  example), storage is in-process PGlite persisted under `FALDA_ROOT/pg`
+  (the compose file above sets `FALDA_ROOT: /data`, backed by the
+  `falda-data` named volume), so atoms/stream/scenes/core survive `docker
+  compose down`/image rebuilds — along with `falda.distill_jobs` and
+  `falda.recall_traces` (recall-trace telemetry, pruned on its own
+  retention schedule; see `docs/RECALL_TRACES.md`), since they all live in
+  the same database. Point `FALDA_DATABASE_URL` at a Postgres service
+  instead for a production deployment. Use `docker compose down -v` only if
+  you intend to wipe memory (and telemetry) entirely.
 - **Distillation runs in this same container** — there is no separate
   gateway/worker service to bring up. The worker auto-enqueues every
   self-store it finds on disk on each `FALDA_WORKER_INTERVAL_MS` tick and
@@ -194,9 +199,9 @@ Notes:
   that's *not* the `768` default set above, which is exactly the mismatch
   `enforceEmbeddingLock` will refuse to boot with if `FALDA_DIM` isn't
   updated to match when switching models.
-  The embedding-lock manifest (`EMBEDDING.json`, written into `/data` on
-  first boot) pins model+dim for that store — changing them later requires
-  re-embedding, not just a config edit.
+  The embedding lock (`falda.meta`'s `embedding.model`/`embedding.dim`,
+  written into the database on first boot) pins model+dim for that store —
+  changing them later requires re-embedding, not just a config edit.
 - **Build context**: the Dockerfile only needs `package.json`,
   `package-lock.json`, `tsconfig.json`, and `src/` (see `.dockerignore`);
   it does not need `docs/`, `test/`, `integrations/`, or the Python
