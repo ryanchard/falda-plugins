@@ -172,8 +172,9 @@ Notes:
   you intend to wipe memory (and telemetry) entirely.
 - **Distillation runs in this same container** — there is no separate
   gateway/worker service to bring up. The worker auto-enqueues every
-  self-store it finds on disk on each `FALDA_WORKER_INTERVAL_MS` tick and
-  drains the shared queue with `FALDA_LLM_*`. Tail `docker compose logs -f
+  self-store registered in `falda.stores` on each
+  `FALDA_WORKER_INTERVAL_MS` tick and drains the shared queue with
+  `FALDA_LLM_*`. Tail `docker compose logs -f
   falda` and confirm a clean `[falda-worker] enqueued ... / pass ...` cycle
   before leaving it running unattended — see the README's "Distillation"
   section in a downstream Compose repo (e.g. `docker-setups`) for the log
