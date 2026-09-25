@@ -13,7 +13,7 @@
  * a silent no-op would leave the user believing memory is shared when it
  * is not.
  */
-import { apiBase } from "./login.mjs";
+import { apiBase } from "./creds.mjs";
 import { writeSettingsEnv } from "./settings.mjs";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

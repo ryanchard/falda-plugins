@@ -92,6 +92,7 @@ learned.
 /falda-memory:pool                      # list the groups you can use
 /falda-memory:pool Argo Team            # bind this project to that group
 /falda-memory:pool 1a2b3c4d-...-...     # or bind by group UUID
+/falda-memory:pool --current            # which group is this project bound to?
 /falda-memory:pool --clear              # back to private memory
 ```
 

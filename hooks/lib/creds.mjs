@@ -8,6 +8,14 @@
  */
 
 /**
+ * `https://h/mcp` -> `https://h`. FALDA's HTTP routes (`/auth/*`,
+ * `/pools/*`, `/healthz`) live on the same host and port as the MCP
+ * endpoint, one level up, so every caller derives them from the one
+ * configured URL rather than carrying a second setting.
+ */
+export function apiBase(mcpUrl) { return mcpUrl.replace(/\/mcp\/?$/, "").replace(/\/$/, ""); }
+
+/**
  * Resolve MCP credentials, or null if this project has no FALDA tenant.
  *
  * `pool` and `recallScope` are set only when their variables are non-empty,

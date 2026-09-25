@@ -1,3 +1,5 @@
+export function apiBase(mcpUrl: string): string;
+
 export interface McpCredentials {
   mcpUrl: string;
   token: string;

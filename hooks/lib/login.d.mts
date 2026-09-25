@@ -1,7 +1,13 @@
 export const DEFAULT_CLIENT_ID: string;
 export const DEFAULT_MCP_URL: string;
 
+/** Re-exported from creds.mjs, where it now lives. */
 export function apiBase(mcpUrl: string): string;
+
+export function pickScopedToken(
+  tok: { access_token?: string; scope?: string; other_tokens?: Array<{ access_token?: string; scope?: string }> } | undefined,
+  serviceScope: string | undefined,
+): string | undefined;
 
 export function openBrowser(url: string): Promise<boolean>;
 

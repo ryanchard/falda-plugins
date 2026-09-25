@@ -18,4 +18,4 @@ export function resolvePool(arg: string, pools: Pool[]): { id: string; name: str
 export function writeProjectPool(
   settingsPath: string,
   uuid: string | null,
-): { backupPath?: string };
+): { backupPath?: string; changed: boolean };

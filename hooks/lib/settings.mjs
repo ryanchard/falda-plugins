@@ -75,18 +75,31 @@ function backup(settingsPath) {
 
 /**
  * Apply `patch` to `doc.env` in the settings file at `settingsPath`: a
- * string value sets the key, `null` deletes it. Returns the backup path
- * when an existing file was replaced.
+ * string value sets the key, `null` deletes it. Returns `changed` (was
+ * anything actually different?) and the backup path when an existing file
+ * was replaced.
+ *
+ * A patch that only deletes keys never creates or rewrites a file for
+ * nothing: unbinding a project that was never bound leaves no settings
+ * file, no backup, and `changed: false` for the caller to report.
  */
 export function writeSettingsEnv(settingsPath, patch) {
+  const entries = Object.entries(patch);
+  const deleteOnly = entries.every(([, v]) => v === null || v === undefined);
   const exists = existsSync(settingsPath);
+  if (!exists && deleteOnly) return { changed: false };
   const doc = exists ? parseSettingsFileOrThrow(settingsPath) : {};
-  const backupPath = exists ? backup(settingsPath) : undefined;
   const env = { ...(doc.env ?? {}) };
-  for (const [k, v] of Object.entries(patch)) {
-    if (v === null || v === undefined) delete env[k];
-    else env[k] = v;
+  let changed = !exists;
+  for (const [k, v] of entries) {
+    if (v === null || v === undefined) {
+      if (k in env) { delete env[k]; changed = true; }
+    } else if (env[k] !== v) {
+      env[k] = v; changed = true;
+    }
   }
+  if (deleteOnly && !changed) return { changed: false };
+  const backupPath = exists ? backup(settingsPath) : undefined;
   doc.env = env;
   const dir = join(settingsPath, "..");
   mkdirSync(dir, { recursive: true });
@@ -104,5 +117,5 @@ export function writeSettingsEnv(settingsPath, patch) {
     rmSync(tmp, { force: true });
     throw err;
   }
-  return { backupPath };
+  return { backupPath, changed };
 }

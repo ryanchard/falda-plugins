@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { homedir, hostname } from "node:os";
 import { spawn } from "node:child_process";
 import { stateDir as defaultStateDir } from "./state.mjs";
+import { apiBase } from "./creds.mjs";
 import { assertSettingsWritable, writeSettingsEnv } from "./settings.mjs";
 
 export const DEFAULT_CLIENT_ID = "ce244ab8-7c9d-48a4-aa55-fe82d615afd6";
@@ -27,8 +28,9 @@ const STATE_TTL_MS = 10 * 60_000;
 const BASE_SCOPES = "openid profile email";
 const CONFIG_TIMEOUT_MS = 5000;
 
-/** `https://h/mcp` -> `https://h`; the auth routes live on the same host/port as the MCP endpoint, one level up. */
-export function apiBase(mcpUrl) { return mcpUrl.replace(/\/mcp\/?$/, "").replace(/\/$/, ""); }
+// `apiBase` now lives in creds.mjs (the hooks need it too); re-exported
+// here because this module has always been where callers imported it from.
+export { apiBase };
 const b64u = (buf) => Buffer.from(buf).toString("base64url");
 function stateFile(dir) { return join(dir, "login.json"); }
 
@@ -94,6 +96,26 @@ export function writeClaudeSettings(settingsPath, { url, token, tenant }) {
   return writeSettingsEnv(settingsPath, { FALDA_MCP_URL: url, FALDA_TOKEN: token, FALDA_TENANT: tenant });
 }
 
+/**
+ * Pick the access token to send to `/auth/login`.
+ *
+ * Globus puts ONE resource server's token at the top level of a token
+ * response and the rest in `other_tokens`; which one is top-level depends
+ * on the scope order, so choose by `scope` rather than by position and
+ * only fall back to the top-level token when nothing declares the scope.
+ * Substring matching, not word equality: a requested scope can come back
+ * decorated (`*<scope>`, or with `[...]` dependent qualifiers).
+ */
+export function pickScopedToken(tok, serviceScope) {
+  if (!serviceScope) return undefined;
+  const candidates = [tok, ...(Array.isArray(tok?.other_tokens) ? tok.other_tokens : [])];
+  const scoped = candidates.find(
+    (t) => t && typeof t.access_token === "string" && t.access_token && typeof t.scope === "string" && t.scope.includes(serviceScope),
+  );
+  if (scoped) return scoped.access_token;
+  return typeof tok?.access_token === "string" && tok.access_token ? tok.access_token : undefined;
+}
+
 export async function finishLogin(code, opts = {}) {
   const env = opts.env ?? process.env; const f = opts.fetch ?? fetch; const now = opts.now ?? Date.now;
   const dir = opts.stateDir ?? defaultStateDir(env);
@@ -111,17 +133,26 @@ export async function finishLogin(code, opts = {}) {
   const tokResp = await f(opts.tokenUrl ?? TOKEN_URL, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ grant_type: "authorization_code", code: String(code).trim(), redirect_uri: REDIRECT, client_id: clientId, code_verifier: st.verifier }).toString() });
   const tok = await tokResp.json().catch(() => ({}));
-  // With a service scope the top-level access_token is the FALDA-scoped
-  // one the server introspects; without it (a 0.3-era server, or a user
-  // who declined) the id_token login still works for one release.
-  const useAccessToken = Boolean(st.service_scope) && typeof tok.access_token === "string" && tok.access_token;
-  if (!tokResp.ok || (!useAccessToken && !tok.id_token)) throw new Error(`Globus rejected the code (${tokResp.status}): ${tok.error_description ?? tok.error ?? "no token in the response"}`);
+  // With a service scope, post the FALDA-scoped access token; without one
+  // (a 0.3-era server, or a user who declined) the id_token login still
+  // works for one release.
+  const accessToken = pickScopedToken(tok, st.service_scope);
+  if (!tokResp.ok || (!accessToken && !tok.id_token)) throw new Error(`Globus rejected the code (${tokResp.status}): ${tok.error_description ?? tok.error ?? "no token in the response"}`);
   const mcpUrl = opts.url ?? env.FALDA_MCP_URL ?? DEFAULT_MCP_URL;
-  const credential = useAccessToken ? { access_token: tok.access_token } : { id_token: tok.id_token };
+  const credential = accessToken ? { access_token: accessToken } : { id_token: tok.id_token };
   const loginResp = await f(`${apiBase(mcpUrl)}/auth/login`, { method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ ...credential, label: opts.label ?? `${hostname()} claude-code` }) });
   const login = await loginResp.json().catch(() => ({}));
-  if (!loginResp.ok || !login.api_key) throw new Error(`FALDA login failed (${loginResp.status}): ${login.error ?? "unknown"}${login.reason ? ` (${login.reason})` : ""}`);
+  if (!loginResp.ok || !login.api_key) {
+    // A 401 on the access-token path is almost always a consent problem:
+    // the token FALDA introspected is not one it can accept (wrong
+    // audience, missing scope), which the user fixes by logging in again
+    // and granting the FALDA consent — not something a retry alone cures.
+    const hint = accessToken && loginResp.status === 401
+      ? " — re-run /falda-memory:login and accept the FALDA consent"
+      : "";
+    throw new Error(`FALDA login failed (${loginResp.status}): ${login.error ?? "unknown"}${login.reason ? ` (${login.reason})` : ""}${hint}`);
+  }
   const out = {
     tenant: login.tenant,
     api_key: login.api_key,
