@@ -44,6 +44,28 @@ its hooks (`hooks/hooks.json`), its MCP server (`.mcp.json`), its Skill
 
 ## Configure
 
+### Hosted FALDA (the common case)
+
+If you were given a token for the hosted service (`docs/HOSTED.md`), your
+tenant is **you**, not a project. Put all three variables in your
+**user-level** `~/.claude/settings.json` so every project on the machine
+captures into your one store:
+
+```json
+{
+  "env": {
+    "FALDA_MCP_URL": "https://falda.cairnscore.ai/mcp",
+    "FALDA_TOKEN": "<your token>",
+    "FALDA_TENANT": "<your tenant name>"
+  }
+}
+```
+
+The rest of this section describes the self-hosted, tenant-per-project
+setup, where the warning about user-level settings applies.
+
+### Self-hosted, one tenant per project
+
 Three environment variables, the same three names used everywhere else in
 this repo (`README.md`, "CLI-client environment variables";
 `integrations/opencode/README.md`):
