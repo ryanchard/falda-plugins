@@ -54,9 +54,13 @@ async function capture(creds, env, sessionId, role, content, turnId) {
   // turn after the first. Duplication (possible without turn_id) is far
   // cheaper than silent loss.
   const message = turnId ? { role, content, turn_id: turnId } : { role, content };
+  // When the project is bound to a group, the turn goes to the pool and
+  // NOT to the private store (spec §5, G4): one conversation is distilled
+  // once, wherever it belongs.
   const result = await callTool(creds, "falda_stream_add", {
     session_id: sessionId,
     messages: [message],
+    ...(creds.pool ? { pool: creds.pool } : {}),
   }, TIMEOUT_MS);
   if (!result) log(env, "warn", "capture failed", { role, session_id: sessionId });
 }
@@ -160,7 +164,7 @@ async function main() {
     // Fire-and-forget: enqueue only. The background sweep worker
     // (FALDA_SWEEP_INTERVAL_MS) remains the safety net, so this is a latency
     // optimisation, never a dependency.
-    const result = await callTool(creds, "falda_distill", {}, TIMEOUT_MS);
+    const result = await callTool(creds, "falda_distill", creds.pool ? { pool: creds.pool } : {}, TIMEOUT_MS);
     if (!result) log(env, "warn", "auto-distill failed", { session_id: sessionId });
     return;
   }
@@ -182,7 +186,14 @@ async function main() {
     const query = String(input.prompt ?? input.user_prompt ?? "").trim();
     if (!query) return;
 
-    const result = await callTool(creds, "falda_recall", { query, mode: "auto" }, TIMEOUT_MS);
+    // Scope is left to the server unless the user pinned one: with a pool
+    // bound it unions the pool and the private store, otherwise private only.
+    const result = await callTool(creds, "falda_recall", {
+      query,
+      mode: "auto",
+      ...(creds.pool ? { pool: creds.pool } : {}),
+      ...(creds.recallScope ? { scope: creds.recallScope } : {}),
+    }, TIMEOUT_MS);
     if (!result) {
       log(env, "warn", "auto-recall failed", { session_id: sessionId });
       return;

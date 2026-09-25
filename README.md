@@ -39,9 +39,9 @@ From within a Claude Code session, once per machine:
 local checkout of the FALDA source tree, `/plugin marketplace add
 /path/to/falda` works the same way.) Installing the plugin registers
 its hooks (`hooks/hooks.json`), its MCP server (`.mcp.json`), its Skill
-(`skills/falda-memory/SKILL.md`), and its five slash commands
-(`/falda-memory:login`, `/falda-memory:recall`, `/falda-memory:remember`,
-`/falda-memory:status`, `/falda-memory:distill`).
+(`skills/falda-memory/SKILL.md`), and its six slash commands
+(`/falda-memory:login`, `/falda-memory:pool`, `/falda-memory:recall`,
+`/falda-memory:remember`, `/falda-memory:status`, `/falda-memory:distill`).
 
 Then sign in — this is the fastest path to a working setup and needs no
 manual configuration:
@@ -79,6 +79,52 @@ project, so these three variables belong in your **user-level**
 
 The rest of this section describes the self-hosted, tenant-per-project
 setup, where the warning about user-level settings applies.
+
+### Share memory with a group
+
+A **pool** is a Globus group. While a project is bound to one, that
+project's sessions capture into the group's shared memory instead of your
+private store, and recall unions the two — you still get your own
+preferences and constraints, plus whatever your colleagues' sessions
+learned.
+
+```
+/falda-memory:pool                      # list the groups you can use
+/falda-memory:pool Argo Team            # bind this project to that group
+/falda-memory:pool 1a2b3c4d-...-...     # or bind by group UUID
+/falda-memory:pool --clear              # back to private memory
+```
+
+Binding writes one variable into **this project's**
+`.claude/settings.json` (other keys preserved, previous file backed up):
+
+```json
+{
+  "env": {
+    "FALDA_POOL": "<globus group uuid>"
+  }
+}
+```
+
+Start a new Claude Code session afterwards: both the hooks and the MCP
+connection read `FALDA_POOL` at startup (`.mcp.json` passes it as the
+`X-Falda-Pool` header), so the model's own `falda_recall` and the capture
+hooks address the same store by construction.
+
+Membership is managed entirely in Globus — join or leave a group at
+[app.globus.org/groups](https://app.globus.org/groups). FALDA learns your
+memberships at login, so after joining a new group run
+`/falda-memory:login` again (and accept the Groups consent when Globus asks
+for it) before the group appears in `/falda-memory:pool`. Any active member
+of a group can read and write its pool; there is nothing to administer on
+the FALDA side. `/falda-memory:status` shows which group a project is
+currently bound to.
+
+`FALDA_RECALL_SCOPE` narrows recall for a bound project: `all` (the
+default — the pool and your private memory), `pool`, or `self`.
+
+Nothing is shared until you bind a project: with no `FALDA_POOL`, this
+plugin behaves exactly as it did before pools existed.
 
 ### Self-hosted, one tenant per project
 

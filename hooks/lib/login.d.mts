@@ -5,10 +5,25 @@ export function apiBase(mcpUrl: string): string;
 
 export function openBrowser(url: string): Promise<boolean>;
 
+export interface AuthConfig {
+  loginClientId?: string;
+  serviceScope?: string;
+}
+
+export function fetchAuthConfig(
+  mcpUrl: string,
+  f?: typeof fetch,
+): Promise<AuthConfig>;
+
 export interface StartLoginOptions {
+  /** MCP url; `/auth/config` is asked for the client id and scope one level up from it. */
+  url?: string;
   clientId?: string;
+  /** Overrides the server's `service_scope`. */
+  scope?: string;
   env?: Record<string, string | undefined>;
   stateDir?: string;
+  fetch?: typeof fetch;
   open?: (url: string) => Promise<boolean>;
   now?: () => number;
 }
@@ -41,9 +56,19 @@ export interface FinishLoginOptions {
   now?: () => number;
 }
 
+export interface LoginGroup {
+  id: string;
+  name: string;
+  role: string;
+}
+
 export interface FinishLoginResult {
   tenant: string;
   api_key: string;
+  user?: string;
+  created?: boolean;
+  groups: LoginGroup[];
+  groups_status?: string;
   settingsPath?: string;
   backupPath?: string;
 }

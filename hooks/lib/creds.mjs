@@ -7,13 +7,29 @@
  * construction rather than by a config lookup.
  */
 
-/** Resolve MCP credentials, or null if this project has no FALDA tenant. */
+/**
+ * Resolve MCP credentials, or null if this project has no FALDA tenant.
+ *
+ * `pool` and `recallScope` are set only when their variables are non-empty,
+ * so an unbound project's credentials object is byte-for-byte what it was
+ * before pools existed — an empty FALDA_POOL must never be sent as a store
+ * name.
+ */
 export function resolveCreds(env = process.env) {
   const mcpUrl = env.FALDA_MCP_URL ?? "http://localhost:8079/mcp";
   const token = env.FALDA_TOKEN;
   const tenant = env.FALDA_TENANT;
   if (!token || !tenant) return null;
-  return { mcpUrl, token, tenant };
+  const creds = { mcpUrl, token, tenant };
+  // The bound Globus group (`/falda-memory:pool`), written into this
+  // project's .claude/settings.json — the same variable .mcp.json
+  // interpolates into X-Falda-Pool, so the hooks and the model's MCP tools
+  // cannot address different stores.
+  if (env.FALDA_POOL) creds.pool = env.FALDA_POOL;
+  // "all" | "pool" | "self"; unset lets the server choose (union when a
+  // pool is addressed, private otherwise).
+  if (env.FALDA_RECALL_SCOPE) creds.recallScope = env.FALDA_RECALL_SCOPE;
+  return creds;
 }
 
 /** Feature gating. Every feature is on unless its var is exactly "0" —
