@@ -16,19 +16,7 @@ The plugins talk to a FALDA server over MCP. You can run your own
 
 ## Using the hosted FALDA
 
-### 1. Get a token
-
-Ask Ryan for a FALDA token. You get two things:
-
-- a **token** (48 hex characters) — treat it like a password;
-- your **tenant name** (usually your first name, e.g. `alice`).
-
-Your tenant is your identity: everything you capture lands in your own
-store, and only your token can read it. Sharing memory with a group is done
-with *pools* that an admin creates and adds you to; you don't need one to
-start.
-
-### 2. Install the Claude Code plugin
+### 1. Install the Claude Code plugin
 
 From a Claude Code session, once per machine:
 
@@ -37,26 +25,50 @@ From a Claude Code session, once per machine:
 /plugin install falda-memory@falda
 ```
 
-### 3. Point it at the hosted service
+### 2. Sign in with Globus
 
-Add these to the `env` block of your **user-level** settings,
-`~/.claude/settings.json` (create the block if it isn't there):
+In a new session:
 
-```json
-{
-  "env": {
-    "FALDA_MCP_URL": "https://falda.cairnscore.ai/mcp",
-    "FALDA_TOKEN": "<your token>",
-    "FALDA_TENANT": "<your tenant name>"
-  }
-}
+```
+/falda-memory:login
 ```
 
-User-level is right for the hosted service: the tenant is *you*, not a
-project, so every project on your machine captures into your one store.
-Start a new session so the MCP connection picks the values up. If you would
-rather keep the token out of `~/.claude/settings.json`, put `FALDA_TOKEN` in
-`~/.claude/settings.local.json`; the two files are merged.
+It prints a Globus link. Open it, sign in, and accept the consent (FALDA
+and "view my groups"). Globus shows you a code; paste it back:
+
+```
+/falda-memory:login <code>
+```
+
+That creates your FALDA account on first sign-in, writes your API key and
+tenant into `~/.claude/settings.json` (a backup of the file is kept next to
+it), and prints the Globus groups you belong to. Start a new session and
+you're done. Your tenant is your identity: everything you capture lands in
+your own store, and only your key can read it. Nothing to ask anyone for.
+
+### 3. (Optional) Share memory with a group
+
+A shared memory pool *is* a Globus group. Join the group in Globus, then in
+the project you want bound to it:
+
+```
+/falda-memory:pool              # lists the groups you're in
+/falda-memory:pool <group name> # binds this project to that group
+```
+
+That writes `FALDA_POOL=<group uuid>` into the project's
+`.claude/settings.json`. From then on, sessions in that project capture into
+the group's pool instead of your private store, and any active member of the
+group sees the same memory. Recall in a bound project searches the pool
+(searching your private store alongside it is coming next). Membership is
+checked by the server against Globus and refreshed hourly; if you leave the
+group, access ends at the next refresh. `/falda-memory:pool --clear` unbinds.
+`/falda-memory:status` shows which group a project is bound to.
+
+Manual configuration (self-hosters, or if you prefer env vars): the plugin
+reads `FALDA_MCP_URL`, `FALDA_TOKEN`, `FALDA_TENANT`, and optionally
+`FALDA_POOL`, from the `env` block of `~/.claude/settings.json` (user-level)
+or a project's `.claude/settings.json`.
 
 ### 4. Check it works
 
@@ -116,8 +128,10 @@ behaviour: [`opencode/README.md`](opencode/README.md).
 |---|---|
 | `/falda-memory:status` says not configured | `FALDA_TOKEN` or `FALDA_TENANT` missing where Claude Code was started. Check `~/.claude/settings.json`; start a new session. |
 | `401` from the MCP server | Wrong or revoked token. |
-| `403 token is not authorized for tenant "x"` | `FALDA_TENANT` doesn't match the tenant on your token (exact match, lowercase). |
-| Recall returns another person's memories | You are using a shared token. Get your own. |
+| `403 token is not authorized for tenant "x"` | `FALDA_TENANT` doesn't match the tenant on your key. Run `/falda-memory:login` again. |
+| `403 not_a_member` in a bound project | You're not an active member of that group (or the UUID is wrong). Join the group in Globus, or `/falda-memory:pool --clear`. |
+| `403 membership_stale` | The server hasn't been able to refresh your memberships for a week. Run `/falda-memory:login` again. |
+| Recall returns another person's memories | Either the project is bound to a group (that's the point) or you're using someone else's key. Run `/falda-memory:login`. |
 | Nothing is ever recalled | Distillation runs in the background every few minutes; new sessions see new facts after the next pass. `/falda-memory:distill` forces one. |
 | The hosted service is down | https://falda.cairnscore.ai/healthz; the plugin fails open (your agent keeps working, memory is just off). |
 
