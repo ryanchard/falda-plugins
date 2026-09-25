@@ -39,17 +39,33 @@ From within a Claude Code session, once per machine:
 local checkout of the FALDA source tree, `/plugin marketplace add
 /path/to/falda` works the same way.) Installing the plugin registers
 its hooks (`hooks/hooks.json`), its MCP server (`.mcp.json`), its Skill
-(`skills/falda-memory/SKILL.md`), and its four slash commands
-(`/falda-memory:recall`, `/falda-memory:remember`, `/falda-memory:status`, `/falda-memory:distill`).
+(`skills/falda-memory/SKILL.md`), and its five slash commands
+(`/falda-memory:login`, `/falda-memory:recall`, `/falda-memory:remember`,
+`/falda-memory:status`, `/falda-memory:distill`).
+
+Then sign in — this is the fastest path to a working setup and needs no
+manual configuration:
+
+```
+/falda-memory:login
+```
+
+Sign in with Globus at the link it prints, copy the code Globus shows you,
+then run `/falda-memory:login <code>`. That writes `FALDA_MCP_URL`,
+`FALDA_TOKEN`, and `FALDA_TENANT` into `~/.claude/settings.json` for you
+(backing up whatever was there first). Start a new Claude Code session
+afterward so the MCP connection picks up the new credentials.
 
 ## Configure
 
 ### Hosted FALDA (the common case)
 
-If you were given a token for the hosted service (see the repository README), your
-tenant is **you**, not a project. Put all three variables in your
-**user-level** `~/.claude/settings.json` so every project on the machine
-captures into your one store:
+`/falda-memory:login` (above) is the normal way to get set up against the
+hosted service — it writes the three variables below for you. This section
+describes what it wrote and how to set it by hand, e.g. if you already have
+a token or are scripting a fresh machine. Your tenant is **you**, not a
+project, so these three variables belong in your **user-level**
+`~/.claude/settings.json`, not a project's:
 
 ```json
 {
