@@ -49,7 +49,7 @@ export async function openBrowser(url) {
 
 export async function startLogin(opts = {}) {
   const env = opts.env ?? process.env;
-  const clientId = opts.clientId ?? env.FALDA_LOGIN_CLIENT_ID ?? DEFAULT_CLIENT_ID;
+  const clientId = opts.clientId || env.FALDA_LOGIN_CLIENT_ID || DEFAULT_CLIENT_ID;
   const dir = opts.stateDir ?? defaultStateDir(env);
   const verifier = b64u(randomBytes(32)); const challenge = b64u(createHash("sha256").update(verifier).digest());
   const state = b64u(randomBytes(16));
