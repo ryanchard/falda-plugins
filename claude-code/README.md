@@ -1,0 +1,304 @@
+# FALDA memory for Claude Code
+
+A Claude Code plugin that gives sessions the same automatic memory behaviour
+the [opencode integration](../opencode/README.md) provides —
+`integrations/opencode/plugin/falda-capture.ts` — reimplemented for Claude
+Code's process-per-hook model, plus two Claude Code-native surfaces
+(a Skill and slash commands) that opencode has no equivalent for. See
+[`docs/future/claude-code-plugin.md`](../../docs/future/claude-code-plugin.md)
+for the full design rationale, including why the port diverges from opencode
+where it does.
+
+## What it does
+
+Four independent, hook-driven features, all reading one shared credential:
+
+| Feature | Fires on | Behaviour |
+|---|---|---|
+| **Auto-capture** | every user prompt and every assistant response | writes the turn to FALDA's Stream (T0) as it happens, so distillation has raw material without the model having to call a tool |
+| **Auto-recall** | the first user prompt of a session | runs one small `falda_recall` (`mode: "auto"`) and injects the result into that prompt, wrapped in `<falda-auto-recall>` |
+| **Auto-distill** | the session compacting (`PreCompact`) | fires one `falda_distill` as a fire-and-forget timing trigger, so the distillation job runs concurrently with compaction's summary generation |
+| **Post-compaction recall** | the first user prompt after a compaction | runs a second `<falda-auto-recall>` recall, since the compaction summary may have dropped detail that T0 still holds |
+
+These mirror the four features of
+`integrations/opencode/plugin/falda-capture.ts` — both integrations call the
+same four `falda_*` tools, so they exercise one MCP surface. The plugin never
+blocks or fails a turn: every hook logs and swallows on any error and always
+exits `0`.
+
+## Install
+
+From within a Claude Code session, once per machine:
+
+```
+/plugin marketplace add ryanchard/falda-plugins
+/plugin install falda-memory@falda
+```
+
+(`ryanchard/falda-plugins` is the published plugins repository; from a
+local checkout of the FALDA source tree, `/plugin marketplace add
+/path/to/falda` works the same way.) Installing the plugin registers
+its hooks (`hooks/hooks.json`), its MCP server (`.mcp.json`), its Skill
+(`skills/falda-memory/SKILL.md`), and its four slash commands
+(`/falda-memory:recall`, `/falda-memory:remember`, `/falda-memory:status`, `/falda-memory:distill`).
+
+## Configure
+
+### Hosted FALDA (the common case)
+
+If you were given a token for the hosted service (see the repository README), your
+tenant is **you**, not a project. Put all three variables in your
+**user-level** `~/.claude/settings.json` so every project on the machine
+captures into your one store:
+
+```json
+{
+  "env": {
+    "FALDA_MCP_URL": "https://falda.cairnscore.ai/mcp",
+    "FALDA_TOKEN": "<your token>",
+    "FALDA_TENANT": "<your tenant name>"
+  }
+}
+```
+
+The rest of this section describes the self-hosted, tenant-per-project
+setup, where the warning about user-level settings applies.
+
+### Self-hosted, one tenant per project
+
+Three environment variables, the same three names used everywhere else in
+this repo (`README.md`, "CLI-client environment variables";
+`integrations/opencode/README.md`):
+
+| Var | Meaning | Default |
+|---|---|---|
+| `FALDA_MCP_URL` | the FALDA MCP endpoint | `http://localhost:8079/mcp` |
+| `FALDA_TOKEN` | bearer token for that endpoint | *(unset — plugin is a no-op)* |
+| `FALDA_TENANT` | which tenant this project addresses | *(unset — plugin is a no-op)* |
+
+Set them per project however you'd set any other project-scoped env var —
+your shell profile, a project `.envrc` (if you use direnv), or a
+`settings.json` `env` block:
+
+```json
+{
+  "env": {
+    "FALDA_MCP_URL": "http://falda-host:8079/mcp",
+    "FALDA_TOKEN": "your-bearer-token",
+    "FALDA_TENANT": "your-project-tenant"
+  }
+}
+```
+
+> **Put that block in the project's settings, not `~/.claude/settings.json`.**
+> Claude Code merges user-level settings into every project on the machine, so
+> a `FALDA_TENANT` set there quietly becomes the tenant for all of them: every
+> repo you open captures into one pool, and `falda_recall` in one project
+> returns another project's memories. Per-tenant isolation is the entire point
+> of the pool layer, and this defeats it in a single line.
+>
+> It is also close to invisible once done. `/falda-memory:status` reports the
+> tenant it resolved, but a wrong-because-shared tenant looks exactly like a
+> right one — the symptom shows up much later as unrelated memories surfacing
+> in recall. If that happens, check the *user-level* settings file first.
+>
+> The right homes are `.claude/settings.json` inside the project (committed —
+> `FALDA_MCP_URL` and `FALDA_TENANT`, no secrets) and
+> `.claude/settings.local.json` (kept out of git — `FALDA_TOKEN`).
+
+**This is the one design point worth understanding before anything else:**
+`.mcp.json` (the model's MCP tool connection) and every hook read the exact
+same three variables — not merely "consistent" values, the same lookup.
+`.mcp.json` interpolates `${FALDA_MCP_URL}`, `${FALDA_TOKEN}`, and
+`${FALDA_TENANT}` directly into the `falda` MCP server config, and
+`hooks/lib/creds.mjs` resolves those same three names from `process.env`.
+There is no second place to configure a tenant and no way for capture to
+write to a different tenant than the one the model's `falda_recall` reads
+from — auto-capture and the model's own tool calls are addressing the same
+tenant by construction, not by convention.
+
+If a project has no FALDA tenant, simply don't set `FALDA_TOKEN`/
+`FALDA_TENANT` there — see "Troubleshooting" below for what that looks like
+in practice.
+
+## Feature flags
+
+The first four features — the ones in the table immediately below — default
+on. Each is switched off independently by setting its variable to the exact
+string `"0"` — any other value (including `""` or `"false"`) leaves it on.
+Tool capture, in its own subsection further down, is the exception: it
+defaults **off** and has the opposite polarity.
+
+| Env var | Default | `0` disables |
+|---|---|---|
+| `FALDA_CAPTURE` | on | writing user/assistant turns to T0 |
+| `FALDA_AUTO_RECALL` | on | the first-prompt-of-session recall injection |
+| `FALDA_DISTILL_ON_COMPACT` | on | the `PreCompact` distill trigger |
+| `FALDA_RECALL_ON_COMPACT` | on | the post-compaction recall injection |
+
+`FALDA_RECALL_ON_COMPACT` is additionally **forced off whenever
+`FALDA_CAPTURE=0`**, regardless of its own value. Post-compaction recall
+exists to re-surface detail the compaction summary dropped — but that detail
+only exists in T0 if auto-capture has been writing this session's turns
+there. With capture off, there is nothing extra for it to find.
+
+### Tool capture
+
+Unlike the four flags above, tool capture is **off by default** and must be
+turned on explicitly: it is off unless `FALDA_CAPTURE_TOOLS` is exactly the
+string `"1"`, and it additionally requires `FALDA_CAPTURE` to be on (a tool
+row with no prose rows around it is not a coherent state). This is the
+opposite polarity from the table above on purpose — tool output multiplies
+row count and is sent to the distillation LLM, so it's not something a user
+should end up with by inaction.
+
+| Env var | Default | Effect |
+|---|---|---|
+| `FALDA_CAPTURE_TOOLS` | **off** | set to exactly `"1"` (and `FALDA_CAPTURE` on) to capture tool results to T0 |
+| `FALDA_CAPTURE_TOOL_MAX_CHARS` | 16384 | verbatim ceiling per tool result before head+tail truncation |
+
+FALDA's own MCP tools are never captured: the hook skips any tool whose name
+matches `/falda/i`. Capturing a `falda_recall` response would feed
+already-distilled memory back into T0 to be re-distilled as fresh evidence,
+so atoms would reinforce themselves session after session.
+
+#### No redaction
+
+**Tool output is stored verbatim — there is no redaction anywhere in FALDA
+today.** If a captured call prints a secret (`cat .env`, `env`,
+`gh auth token`, a connection string in a stack trace), that secret lands in
+SQLite, in the FTS index, and in every distillation prompt sent to your
+configured LLM. Turn this flag on only where that is acceptable — in
+practice, a local store distilled by a local model. See §8 of
+`docs/future/tool-output-capture.md`, which records this as a blocker for
+any default-on proposal.
+
+#### Distillation cannot keep up with a tool-capture session
+
+This is the real operational cost of the flag, and it is worth understanding
+before turning it on. The ceiling on distillation throughput is not the
+character budget — it is the extraction window against the sweep cadence:
+
+- L1 extraction reads at most `windowSize` turns per pass, default **20**
+  (`DEFAULT_WINDOW_SIZE`, `src/distill/core.ts`). There is no environment
+  variable for this one — it is a constant, so raising it is a code change.
+- The worker enqueues passive work once per `FALDA_SWEEP_INTERVAL_MS`,
+  default **300000** (5 minutes), and the enqueue coalesces — a store never
+  has more than one pending passive job — so a store gets **one pass per
+  sweep interval**. `FALDA_DRAIN_INTERVAL_MS` (default 60000) only sets how
+  soon after that enqueue the pass actually starts (`src/distill/worker.ts`).
+
+At the defaults that is roughly **4 turns per minute** in steady state. Once
+rows are large the window is trimmed by `FALDA_DISTILL_WINDOW_MAX_CHARS`
+(default 60000) before the prompt is built, so a pass covering 16 KB tool
+rows carries only three or four of them — **under 1 turn per minute**.
+
+A session with tool capture on writes turns an order of magnitude faster
+than that. Nothing is lost: the watermark simply falls behind and the
+backlog drains after the session ends. But "I'll recall that next session"
+can mean hours from now rather than minutes, and the gap grows with every
+additional capturing session. If that matters for how you work, lower
+`FALDA_SWEEP_INTERVAL_MS` (and `FALDA_DRAIN_INTERVAL_MS` with it, since the
+drain tick must be at least as frequent to be useful); raising
+`DEFAULT_WINDOW_SIZE` is the other lever, at the cost of a larger prompt per
+pass. The `PreCompact` distill hook and `/falda-memory:distill` both
+enqueue at explicit priority and wake the drain immediately, but each still
+runs a single window — they shorten the wait, they do not raise the ceiling.
+
+#### Backpressure onto auto-recall
+
+`PostToolUse` hooks are registered `async`, and one fires per tool call, so
+several `node` processes can be in flight against the FALDA server at the
+same time — each one an `addStream` that embeds its row inline
+(`src/falda.ts`). The plugin's one *synchronous* hook, `auto-recall`, shares
+that same server and has only a 5 s client budget (`TIMEOUT_MS` in
+`falda-hook.mjs`). Under a burst of tool calls, ingest can therefore starve
+recall: the recall request times out, the hook logs a warning to
+`hook.log`, exits 0, and the prompt proceeds with no memory injected. That
+failure is silent by design — a hook must never block or break a prompt —
+so if auto-recall seems to fire less often once tool capture is on, check
+`hook.log` before assuming recall is broken.
+
+## What gets captured
+
+User prose and assistant prose by default. Tool results are captured too when
+`FALDA_CAPTURE_TOOLS=1` — opt-in, because it multiplies row count and sends
+tool output to the distillation LLM.
+
+The original rationale for excluding them was that bash output and diffs are
+noise the distiller has to filter back out, at an embedding cost per row.
+That holds for the noise; it misses the facts. A value that enters a session
+only through a tool — a config value, a schema shape, a version, an error
+string — is never restated in prose, so it reaches neither T0 nor the
+compaction summary. See `docs/future/tool-output-capture.md` for the design
+and the measurement that settles which effect dominates.
+
+**Known fidelity limitation.** Assistant-side capture uses the `Stop` hook's
+`last_assistant_message` field, which is the turn's *final* response. In an
+agentic turn that makes several tool calls with narration in between, only
+that final response is captured — intermediate assistant prose between tool
+calls is not, where the opencode plugin (which sees a live stream of message
+parts) captures all of it. This is a deliberate tradeoff, not an oversight:
+in most agentic turns the intermediate text is procedural narration, and the
+final response carries the substantive conclusion. See "Open questions" in
+`docs/future/claude-code-plugin.md` if you're evaluating whether this
+matters for your use.
+
+## Hook timeout ordering
+
+`hooks/hooks.json` sets an external harness `"timeout": 10` (seconds) on the
+`auto-recall` hook, deliberately larger than `falda-hook.mjs`'s own internal
+`TIMEOUT_MS = 5000` (5 seconds) fetch budget. This ordering is required, not
+arbitrary: Node process boot plus reading stdin adds latency on top of the
+internal fetch timeout, so if the harness timeout were less than or equal to
+the internal one, a slow server could cause the *harness* to kill the process
+by signal before it reaches its own `AbortSignal.timeout`-driven error path —
+which would bypass the always-exit-0 guarantee this plugin depends on. Keep
+the harness timeout comfortably above the internal one if either is changed.
+JSON does not support inline comments, hence this note living here rather
+than in `hooks.json` itself.
+
+## Troubleshooting
+
+- **Log file**: `~/.falda/claude-code/hook.log` (or, if `FALDA_CC_STATE_DIR`
+  is set, `<that dir>/hook.log`). One JSON line per event, rotated at 1 MiB.
+  Every hook failure — connection refused, non-2xx response, malformed
+  input, timeout — is logged here rather than to stdout or stderr, because
+  on `UserPromptSubmit` stdout *is* the channel the recall injection uses;
+  a stray print there would land in the model's context instead of a log.
+- **`/falda-memory:status`**: run this slash command to check what the plugin
+  currently resolves — it calls `falda_whoami` and reports the tenant it
+  got back, fetches the FALDA server's unauthenticated `/healthz`, and
+  prints `FALDA_MCP_URL`/`FALDA_TENANT` from the environment (never
+  `FALDA_TOKEN`). This is the fastest way to tell "server unreachable" from
+  "not configured" from "wrong tenant".
+- **"Nothing is happening" is expected when `FALDA_TOKEN` or `FALDA_TENANT`
+  is unset.** Every hook treats missing credentials as a **silent no-op** —
+  by design, so the plugin can be installed globally and simply do nothing
+  in projects that don't have a FALDA tenant configured. If capture and
+  recall both appear inert, check `/falda-memory:status` or the environment before
+  assuming something is broken.
+- **`FALDA_CC_STATE_DIR`**: overrides the plugin's state directory (default
+  `~/.falda/claude-code/`), which holds per-session recall-tracking state
+  (`<session_id>.json`) and `hook.log`. This exists as a testing seam — set
+  it to point the hooks at an isolated temp directory when scripting or
+  testing the plugin rather than exercising a real `~/.falda/`.
+  It is also the remedy on a **read-only `$HOME`**: `writeState` fails
+  silently there (state is an optimisation, never a correctness
+  requirement — see `hook.log`, which best-effort-logs the failure), but
+  the practical effect is that `recalled` never persists, so *every*
+  prompt re-attempts the synchronous 5s auto-recall instead of firing
+  once per session. Point `FALDA_CC_STATE_DIR` at a writable directory to
+  fix that.
+
+## Requirements
+
+- **Node >= 20** — the hooks are dependency-free `.mjs` scripts run directly
+  by `node`; there is no `package.json` under `integrations/claude-code/`
+  and no `node_modules` to install.
+- **A reachable `falda serve` MCP endpoint** — by default
+  `http://localhost:8079/mcp`. Only the MCP port (`8079`) needs to be
+  reachable from wherever Claude Code runs. The hooks speak MCP directly via
+  a small dependency-free JSON-RPC client (`hooks/lib/mcp.mjs`); they never
+  call FALDA's HTTP/JSON API (port `8077`), so you do not need to expose or
+  configure that port for this plugin to work.
