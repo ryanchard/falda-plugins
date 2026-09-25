@@ -27,6 +27,7 @@ function parseArgs(argv) {
     else if (a === "--url") flags.url = argv[++i];
     else if (a === "--client-id") flags.clientId = argv[++i];
     else if (a === "--label") flags.label = argv[++i];
+    else if (a === "--scope") flags.scope = argv[++i];
     else positional.push(a);
   }
   return { positional, flags };
@@ -37,7 +38,7 @@ async function main() {
   const [command, ...rest] = positional;
 
   if (command === "start") {
-    const { url } = await startLogin({ clientId: flags.clientId });
+    const { url } = await startLogin({ clientId: flags.clientId, url: flags.url, scope: flags.scope });
     process.stdout.write(`Open this link, sign in, then run: /falda-memory:login <code>\n${url}\n`);
     return;
   }
@@ -58,11 +59,19 @@ async function main() {
       process.stdout.write(
         `Logged in as tenant ${out.tenant}. Wrote FALDA_MCP_URL/FALDA_TOKEN/FALDA_TENANT to ${out.settingsPath}${backupClause}. Start a new Claude Code session.\n`,
       );
+      // Groups by NAME (and role). The UUID is what /falda-memory:pool
+      // writes, and is printed there; here the point is only to show the
+      // user which shared memories this login can reach.
+      if (out.groups.length) {
+        process.stdout.write(`Groups you can share memory with: ${out.groups.map((g) => `${g.name} (${g.role})`).join(", ")}. Run /falda-memory:pool to bind this project to one.\n`);
+      } else if (out.groups_status === "no_consent") {
+        process.stdout.write("FALDA could not read your Globus groups — run /falda-memory:login again and accept the Groups consent to share memory with a group.\n");
+      }
     }
     return;
   }
 
-  throw new Error("usage: login.mjs start | login.mjs finish <code> [--url ...] [--client-id ...] [--label ...] [--print]");
+  throw new Error("usage: login.mjs start [--url ...] [--client-id ...] [--scope ...] | login.mjs finish <code> [--url ...] [--client-id ...] [--label ...] [--print]");
 }
 
 main().catch((err) => {
