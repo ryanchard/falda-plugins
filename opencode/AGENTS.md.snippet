@@ -1,0 +1,36 @@
+## Memory (FALDA)
+
+This project has a FALDA memory store connected via MCP (`falda_*` tools).
+
+- Before starting non-trivial work, call `falda_recall` with a natural-language
+  query. It assembles the best available context across all memory tiers
+  (facts, preferences, rules, past episodes, project core) in one call — you
+  do not need to decide which tier to query.
+- A small amount of memory context may already be injected automatically at
+  the start of a session, wrapped in a `<falda-auto-recall>` block — this is
+  a smaller-budget, best-effort recall fired before you asked for anything,
+  not a substitute for calling `falda_recall` yourself. Call `falda_recall`
+  whenever you need more than what's already there.
+- When you learn something durable worth remembering long-term (a fact,
+  preference, constraint, rule, or standing instruction — not a transient
+  detail), call `falda_remember` with `{ content, type }`. The field is
+  `content`, not `text`. Each call records a new memory — to correct a
+  previously remembered fact, call `falda_remember` again with the corrected
+  content rather than expecting the old one to be edited.
+- To stop recalling a memory that's outdated or wrong, call `falda_forget`
+  with its `atom_id` (from a `falda_remember` result or a `falda_recall`
+  hit). This only stops it from surfacing — it is not privacy erasure.
+- Distillation into durable memories happens automatically — a plugin
+  triggers it as a session compacts, and a background worker also runs
+  periodically — so you don't need to call `falda_distill` for that. At the
+  end of a substantial work session you may call it yourself as an extra
+  safeguard (it's asynchronous — returns a `job_id`; poll with
+  `falda_distill_status` if you need to confirm completion), but it's not
+  something to call on every turn.
+- Raw conversation turns are captured automatically; you do not need to call
+  `falda_stream_add` yourself except to backfill or annotate.
+- Scenes and core are not directly editable and are not separate tools here
+  — they're maintained by FALDA's distillation pipeline and surfaced to you
+  through `falda_recall`.
+- If recall results seem off (e.g. missing what you just wrote), call
+  `falda_whoami` to confirm which tenant this connection resolves to.
