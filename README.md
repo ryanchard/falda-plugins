@@ -28,16 +28,16 @@ exits `0`.
 
 ## Install
 
-From within a Claude Code session, once for this checkout of FALDA:
+From within a Claude Code session, once per machine:
 
 ```
-/plugin marketplace add /path/to/falda
-/plugin install falda-memory
+/plugin marketplace add ryanchard/falda-plugins
+/plugin install falda-memory@falda
 ```
 
-`/path/to/falda` is a local checkout of this repository (it contains the
-repo-root `.claude-plugin/marketplace.json` that lists `falda-memory`,
-sourced from `integrations/claude-code/`). Installing the plugin registers
+(`ryanchard/falda-plugins` is the published plugins repository; from a
+local checkout of the FALDA source tree, `/plugin marketplace add
+/path/to/falda` works the same way.) Installing the plugin registers
 its hooks (`hooks/hooks.json`), its MCP server (`.mcp.json`), its Skill
 (`skills/falda-memory/SKILL.md`), and its four slash commands
 (`/falda-memory:recall`, `/falda-memory:remember`, `/falda-memory:status`, `/falda-memory:distill`).
@@ -46,7 +46,7 @@ its hooks (`hooks/hooks.json`), its MCP server (`.mcp.json`), its Skill
 
 ### Hosted FALDA (the common case)
 
-If you were given a token for the hosted service (`docs/HOSTED.md`), your
+If you were given a token for the hosted service (see the repository README), your
 tenant is **you**, not a project. Put all three variables in your
 **user-level** `~/.claude/settings.json` so every project on the machine
 captures into your one store:
