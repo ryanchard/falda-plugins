@@ -1,0 +1,13 @@
+{
+  "name": "falda",
+  "owner": {
+    "name": "FALDA"
+  },
+  "plugins": [
+    {
+      "name": "falda-memory",
+      "source": "./claude-code",
+      "description": "Long-term memory for Claude Code, backed by a FALDA server (hosted or your own)."
+    }
+  ]
+}
