@@ -108,7 +108,12 @@ export function writeClaudeSettings(settingsPath, { url, token, tenant }) {
   const target = exists ? realpathSync(settingsPath) : settingsPath;
   const tmp = `${target}.tmp-${process.pid}`;
   writeFileSync(tmp, JSON.stringify(doc, null, 2) + "\n", { mode: 0o600 });
-  renameSync(tmp, target);
+  try {
+    renameSync(tmp, target);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
   return { backupPath };
 }
 
