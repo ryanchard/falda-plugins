@@ -1,5 +1,6 @@
 {
   "name": "falda",
+  "description": "FALDA long-term memory plugins for coding agents (Claude Code, OpenCode); works with the hosted FALDA or your own server.",
   "owner": {
     "name": "FALDA"
   },
