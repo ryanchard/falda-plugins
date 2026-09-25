@@ -11,7 +11,20 @@
  * steps and is deleted as soon as it's consumed (success or expiry).
  */
 import { randomBytes, createHash } from "node:crypto";
-import { readFileSync, writeFileSync, mkdirSync, copyFileSync, rmSync, existsSync, chmodSync } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  rmSync,
+  existsSync,
+  chmodSync,
+  openSync,
+  closeSync,
+  renameSync,
+  realpathSync,
+  accessSync,
+  constants,
+} from "node:fs";
 import { join } from "node:path";
 import { homedir, hostname } from "node:os";
 import { spawn } from "node:child_process";
@@ -49,14 +62,53 @@ export async function startLogin(opts = {}) {
   return { url: url.toString() };
 }
 
+/** Parse settingsPath's existing content, or throw a message naming the path. Caller checks existence first. */
+function parseSettingsFileOrThrow(settingsPath) {
+  const raw = readFileSync(settingsPath, "utf8");
+  if (!raw.trim()) return {};
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`${settingsPath} is not valid JSON (${err.message}) — fix it and re-run`);
+  }
+}
+
+/**
+ * Pre-flight check, run before the one-time authorization code is
+ * exchanged: fail fast on a broken or unwritable settings target rather
+ * than burn the code and only then discover the write can't happen.
+ */
+function assertSettingsWritable(settingsPath) {
+  if (existsSync(settingsPath)) parseSettingsFileOrThrow(settingsPath);
+  const dir = join(settingsPath, "..");
+  mkdirSync(dir, { recursive: true });
+  accessSync(dir, constants.W_OK);
+}
+
 export function writeClaudeSettings(settingsPath, { url, token, tenant }) {
-  let doc = {};
-  if (existsSync(settingsPath)) { const raw = readFileSync(settingsPath, "utf8"); doc = raw.trim() ? JSON.parse(raw) : {}; }
-  const backupPath = existsSync(settingsPath) ? `${settingsPath}.bak-${new Date().toISOString().replace(/[:.]/g, "-")}` : undefined;
-  if (backupPath) { copyFileSync(settingsPath, backupPath); chmodSync(backupPath, 0o600); }
+  const exists = existsSync(settingsPath);
+  const doc = exists ? parseSettingsFileOrThrow(settingsPath) : {};
+  let backupPath;
+  if (exists) {
+    backupPath = `${settingsPath}.bak-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+    // Create the backup already restricted to 0600 via an exclusive open —
+    // copyFileSync followed by a later chmodSync would leave the backup
+    // briefly world-readable under the process umask.
+    const fd = openSync(backupPath, "wx", 0o600);
+    try { writeFileSync(fd, readFileSync(settingsPath)); } finally { closeSync(fd); }
+  }
   doc.env = { ...(doc.env ?? {}), FALDA_MCP_URL: url, FALDA_TOKEN: token, FALDA_TENANT: tenant };
-  mkdirSync(join(settingsPath, ".."), { recursive: true });
-  writeFileSync(settingsPath, JSON.stringify(doc, null, 2) + "\n", { mode: 0o600 }); chmodSync(settingsPath, 0o600);
+  const dir = join(settingsPath, "..");
+  mkdirSync(dir, { recursive: true });
+  // Atomic write: write the new content to a temp file, then rename onto
+  // the real target. Renaming onto realpathSync(settingsPath) — rather
+  // than settingsPath itself — preserves symlink behaviour: a symlinked
+  // settings file keeps pointing at the same real file instead of being
+  // replaced by a plain file at the symlink's location.
+  const target = exists ? realpathSync(settingsPath) : settingsPath;
+  const tmp = `${target}.tmp-${process.pid}`;
+  writeFileSync(tmp, JSON.stringify(doc, null, 2) + "\n", { mode: 0o600 });
+  renameSync(tmp, target);
   return { backupPath };
 }
 
@@ -66,6 +118,13 @@ export async function finishLogin(code, opts = {}) {
   if (!existsSync(stateFile(dir))) throw new Error("no login in progress — run `login start` first");
   const st = JSON.parse(readFileSync(stateFile(dir), "utf8"));
   if (now() - st.created_at > STATE_TTL_MS) { rmSync(stateFile(dir), { force: true }); throw new Error("login expired — run `login start` again"); }
+
+  const settingsPath = opts.settingsPath ?? join(homedir(), ".claude", "settings.json");
+  // Validate the settings target before spending the one-time code: a
+  // broken settings file or an unwritable directory should fail here,
+  // leaving the state file (and the code) usable for a retry.
+  if (opts.write !== false) assertSettingsWritable(settingsPath);
+
   const clientId = opts.clientId ?? st.client_id;
   const tokResp = await f(opts.tokenUrl ?? TOKEN_URL, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ grant_type: "authorization_code", code: String(code).trim(), redirect_uri: REDIRECT, client_id: clientId, code_verifier: st.verifier }).toString() });
@@ -76,10 +135,19 @@ export async function finishLogin(code, opts = {}) {
     body: JSON.stringify({ id_token: tok.id_token, label: opts.label ?? `${hostname()} claude-code` }) });
   const login = await loginResp.json().catch(() => ({}));
   if (!loginResp.ok || !login.api_key) throw new Error(`FALDA login failed (${loginResp.status}): ${login.error ?? "unknown"}${login.reason ? ` (${login.reason})` : ""}`);
-  rmSync(stateFile(dir), { force: true });
   const out = { tenant: login.tenant, api_key: login.api_key };
-  if (opts.write === false) return out;
-  const settingsPath = opts.settingsPath ?? join(homedir(), ".claude", "settings.json");
-  const { backupPath } = writeClaudeSettings(settingsPath, { url: mcpUrl, token: login.api_key, tenant: login.tenant });
-  return { ...out, settingsPath, backupPath };
+  if (opts.write === false) { rmSync(stateFile(dir), { force: true }); return out; }
+  // The state file (and thus the ability to retry with the same PKCE
+  // verifier) is only released once the settings write has actually
+  // succeeded — the code itself was already consumed by the exchange
+  // above, so a write failure here must not also strand the user without
+  // any way to know a fresh `login start` is required.
+  let written;
+  try {
+    written = writeClaudeSettings(settingsPath, { url: mcpUrl, token: login.api_key, tenant: login.tenant });
+  } catch (err) {
+    throw new Error(`${err.message} — your API key was created but not saved; run \`login start\` again to get a new one, or use --print`);
+  }
+  rmSync(stateFile(dir), { force: true });
+  return { ...out, settingsPath, backupPath: written.backupPath };
 }

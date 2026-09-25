@@ -54,8 +54,9 @@ async function main() {
     if (flags.print) {
       process.stdout.write(`${out.api_key}\n`);
     } else {
+      const backupClause = out.backupPath ? ` (backup ${out.backupPath})` : "";
       process.stdout.write(
-        `Logged in as tenant ${out.tenant}. Wrote FALDA_MCP_URL/FALDA_TOKEN/FALDA_TENANT to ${out.settingsPath} (backup ${out.backupPath}). Start a new Claude Code session.\n`,
+        `Logged in as tenant ${out.tenant}. Wrote FALDA_MCP_URL/FALDA_TOKEN/FALDA_TENANT to ${out.settingsPath}${backupClause}. Start a new Claude Code session.\n`,
       );
     }
     return;
